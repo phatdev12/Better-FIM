@@ -11,18 +11,21 @@ P_CROSSOVER = 0.6
 P_MUTATION = 0.1
 LAMBDA_VAL = 0.5
 PROPAGATION_PROB = 0.01
-MC_SIMULATIONS = 50  
+MC_SIMULATIONS = 1000
 
 def evuluate(individual, G, groups, ideal_influences):
     mf, dcv = mf_dcv.calculate_MF_DCV(G, individual, groups, ideal_influences, p=PROPAGATION_PROB, mc=MC_SIMULATIONS)
     fit = fitness.fitness_F(mf, dcv, LAMBDA_VAL)
     return individual, mf, dcv, fit
 
-def betterFIM(links_file, attr_file):
+def betterFIM(links_file, attr_file=None, attribute_name='auto'):
     try:
-        G, node_groups_map = data.load_data(links_file, attr_file)
+        if links_file.endswith('.pickle') or links_file.endswith('.pkl'):
+            G, node_groups_map = data.load_data_from_pickle(links_file, attribute_name)
+        else:
+            G, node_groups_map = data.load_data(links_file, attr_file)
     except FileNotFoundError:
-        print(f"Error: Không tìm thấy file data. Hãy đảm bảo {links_file} và {attr_file} tồn tại.")
+        print(f"Error: Không tìm thấy file data. Hãy đảm bảo {links_file} tồn tại.")
         return
 
     groups = {}
@@ -89,6 +92,18 @@ def betterFIM(links_file, attr_file):
                     break
         fairness_random_solution = fairness_random_solution[:K_SEEDS]
         population.append(fairness_random_solution)
+        
+        # --- Thêm cá thể random dựa trên SN score để tăng đa dạng quần thể ---
+        all_nodes = list(G.nodes())
+        if all_nodes:
+            weights = np.array([SN_scores.get(n, 0) + 1e-8 for n in all_nodes])
+            if weights.sum() == 0:
+                random_weighted_solution = random.sample(all_nodes, min(K_SEEDS, len(all_nodes)))
+            else:
+                probs = weights / weights.sum()
+                k_pick = min(K_SEEDS, len(all_nodes))
+                random_weighted_solution = list(np.random.choice(all_nodes, size=k_pick, replace=False, p=probs))
+            population.append(random_weighted_solution)
 
     random.shuffle(population)
     best_S = None
@@ -160,5 +175,6 @@ def betterFIM(links_file, attr_file):
             new_pop.append(child)
             
         population = new_pop
-        
+    
+    
     return best_Fit, best_metrics, best_S

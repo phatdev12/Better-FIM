@@ -2,6 +2,19 @@ import numpy as np
 import random
 
 def run_IC(G, S, p=0.01, mc=50, target_nodes=None):
+    """
+    Chạy mô phỏng Independent Cascade để tính influence spread
+    
+    Args:
+        G: đồ thị NetworkX
+        S: tập seed nodes
+        p: xác suất lan truyền
+        mc: số lần Monte Carlo simulation
+        target_nodes: nếu chỉ định, chỉ đếm influence trong tập này
+    
+    Returns:
+        average influence spread
+    """
     spread = 0
     S_set = set(S)
     target_set = set(target_nodes) if target_nodes is not None else None
@@ -15,8 +28,10 @@ def run_IC(G, S, p=0.01, mc=50, target_nodes=None):
             for node in new_active:
                 if G.has_node(node):
                     neighbors = list(G.neighbors(node))
-                    if not neighbors: continue
+                    if not neighbors:
+                        continue
                     
+                    # Vectorized random check
                     success = np.random.random(len(neighbors)) < p
                     for i, nbr in enumerate(neighbors):
                         if success[i] and nbr not in current_active:
@@ -31,7 +46,20 @@ def run_IC(G, S, p=0.01, mc=50, target_nodes=None):
             
     return spread / mc
 
+
 def greedy_max_influence(G_sub, k, p=0.01, mc=20):
+    """
+    Thuật toán greedy để tìm k nodes có influence tối đa
+    
+    Args:
+        G_sub: subgraph
+        k: số lượng seed nodes
+        p: xác suất lan truyền
+        mc: số lần Monte Carlo
+    
+    Returns:
+        influence spread của k nodes tốt nhất
+    """
     S = []
 
     if k > len(G_sub):
@@ -40,12 +68,15 @@ def greedy_max_influence(G_sub, k, p=0.01, mc=20):
     for _ in range(k):
         best_node = None
         max_gain = -1
-        candidates = list(G_sub.nodes()) 
-        if len(candidates) > 100: 
-             candidates = random.sample(candidates, 100)
+        candidates = list(G_sub.nodes())
+        
+        # Nếu quá nhiều candidates, sample để tăng tốc
+        if len(candidates) > 100:
+            candidates = random.sample(candidates, 100)
 
         for node in candidates:
-            if node in S: continue
+            if node in S:
+                continue
             spread = run_IC(G_sub, S + [node], p, mc=10)
             if spread > max_gain:
                 max_gain = spread
