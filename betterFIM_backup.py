@@ -109,14 +109,14 @@ def betterFIM(links_file, attr_file=None, attribute_name='auto'):
     best_metrics = (0, 0)
 
     for gen in range(MAX_GEN):
-        # Evaluate using parallel processing
-        with Pool(processes=cpu_count()) as pool:
-            results = pool.starmap(evuluate, [(ind, G, groups, ideal_influences) for ind in population])
-
         fitnesses = []
-        for ind, mf, dcv, fit in results:
+        
+        # Evaluate
+        for ind in population:
+            mf, dcv = mf_dcv.calculate_MF_DCV(G, ind, groups, ideal_influences, p=PROPAGATION_PROB, mc=MC_SIMULATIONS)
+            fit = fitness.fitness_F(mf, dcv, LAMBDA_VAL)
             fitnesses.append(fit)
-
+            
             if fit > best_Fit:
                 best_Fit = fit
                 best_S = ind

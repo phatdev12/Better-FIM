@@ -3,27 +3,24 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from betterFIM import betterFIM
-from multiprocessing import cpu_count
 
 if __name__ == "__main__":
-    links_file = "dataset/youtube.links"
-    attr_file = "dataset/youtube.attr"
-
+    links_file = "dataset/rice_subset.pickle"
+    attr_file = None
+    
     results = []
     mf_list = []
     dcv_list = []
-
-    print(f"Running Better-FIM algorithm with {cpu_count()} CPU cores (parallel evaluation inside each run)...")
-
+    
+    print("Running Better-FIM algorithm...")
     for i in range(20):
-        print(f"Starting run {i+1}/20...")
         result = betterFIM(links_file, attr_file)
         if result:
             fit, (mf, dcv), seed_set = result
             results.append((fit, mf, dcv, seed_set))
             mf_list.append(mf)
             dcv_list.append(dcv)
-            print(f"Run {i+1} completed: F = {mf - dcv:.4f} (MF: {mf:.4f}, DCV: {dcv:.4f})")
+            print(f"F = mean(MF) - mean(DCV) = {mf - dcv:.4f} (MF: {mf:.4f}, DCV: {dcv:.4f})")
     
     if results:
         # Tính F giống CEA-FIM: F = mean(MF) - mean(DCV)

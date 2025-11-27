@@ -6,11 +6,9 @@ def load_data_from_pickle(pickle_file, attribute_name='group'):
     with open(pickle_file, 'rb') as f:
         g = pickle.load(f)
     
-    # Convert to undirected nếu cần
     G = g.to_undirected() if g.is_directed() else g
     common_attributes = ['group', 'color', 'region', 'ethnicity', 'age', 'gender', 'status', 'community', 'class']
-    
-    # Nếu auto, tìm attribute đầu tiên có sẵn
+
     if attribute_name == 'auto':
         found_attr = None
         if len(G.nodes()) > 0:
@@ -23,7 +21,6 @@ def load_data_from_pickle(pickle_file, attribute_name='group'):
                     found_attr = attr
                     break
             
-            # Nếu không tìm thấy, lấy attribute đầu tiên (trừ các metadata)
             if not found_attr:
                 for attr in node_attrs:
                     if attr not in ['pid', '_nx_name', 'label', 'name']:
