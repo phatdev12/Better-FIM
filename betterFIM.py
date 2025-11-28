@@ -18,7 +18,7 @@ def evuluate(individual, G, groups, ideal_influences):
     fit = fitness.fitness_F(mf, dcv, LAMBDA_VAL)
     return individual, mf, dcv, fit
 
-def betterFIM(links_file, attr_file=None, attribute_name='auto'):
+def betterFIM(links_file, attr_file=None, attribute_name='age'):
     try:
         if links_file.endswith('.pickle') or links_file.endswith('.pkl'):
             G, node_groups_map = data.load_data_from_pickle(links_file, attribute_name)

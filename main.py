@@ -6,8 +6,8 @@ from betterFIM import betterFIM
 from multiprocessing import cpu_count
 
 if __name__ == "__main__":
-    links_file = "dataset/youtube.links"
-    attr_file = "dataset/youtube.attr"
+    links_file = "dataset/karate_with_attributes.pickle"
+    attr_file = None
 
     results = []
     mf_list = []
