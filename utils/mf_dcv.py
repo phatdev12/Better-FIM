@@ -6,12 +6,15 @@ def _seed_key(S):
     except Exception:
         return tuple(S)
 
-def calculate_MF_DCV(G, S, groups, ideal_influences, p=0.01, mc=50, cache=None):
+def calculate_MF_DCV(G, S, groups, ideal_influences, p=0.01, mc=50, cache=None, live_graphs=None):
     """
     Tính MF (Min Fraction) và DCV (Deviation from Coverage Violation)
     
     MF = min(actual_influence / group_size) - coverage tối thiểu cho các nhóm
     DCV = avg(max(0, (ideal - actual) / ideal)) - độ lệch trung bình so với ideal
+    
+    Args:
+        live_graphs: Pre-computed live edge graphs (SPEED BOOST!)
     """
     unique_groups = list(groups.keys())
     
@@ -28,10 +31,17 @@ def calculate_MF_DCV(G, S, groups, ideal_influences, p=0.01, mc=50, cache=None):
             if k in cache:
                 actual_inf = cache[k]
             else:
-                actual_inf = ic.run_IC(G, S, p, mc, target_nodes=group_nodes)
+                # Use pre-computed live graphs if available
+                if live_graphs:
+                    actual_inf = ic.run_IC_precomputed(S, live_graphs, target_nodes=group_nodes)
+                else:
+                    actual_inf = ic.run_IC(G, S, p, mc, target_nodes=group_nodes)
                 cache[k] = actual_inf
         else:
-            actual_inf = ic.run_IC(G, S, p, mc, target_nodes=group_nodes)
+            if live_graphs:
+                actual_inf = ic.run_IC_precomputed(S, live_graphs, target_nodes=group_nodes)
+            else:
+                actual_inf = ic.run_IC(G, S, p, mc, target_nodes=group_nodes)
         
         group_size = len(group_nodes)
         fraction = actual_inf / group_size if group_size > 0 else 0

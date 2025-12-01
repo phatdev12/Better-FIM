@@ -13,12 +13,12 @@ P_CROSSOVER = 0.6
 P_MUTATION = 0.1
 LAMBDA_VAL = 0.5
 PROPAGATION_PROB = 0.01
-MC_SIMULATIONS = 1000
+MC_SIMULATIONS = 1000  # Tăng lại từ 100 lên 1000 để tăng accuracy
 
-def evuluate(individual, G, groups, ideal_influences, cache):
+def evuluate(individual, G, groups, ideal_influences, cache, live_graphs=None):
     mf, dcv = mf_dcv.calculate_MF_DCV(
         G, individual, groups, ideal_influences,
-        p=PROPAGATION_PROB, mc=MC_SIMULATIONS, cache=cache
+        p=PROPAGATION_PROB, mc=MC_SIMULATIONS, cache=cache, live_graphs=live_graphs
     )
     fit = fitness.fitness_F(mf, dcv, LAMBDA_VAL)
     return individual, mf, dcv, fit
@@ -41,11 +41,17 @@ def betterFIM(links_file, attr_file=None, attribute_name='color'):
     print(f"Nodes: {len(G)}, Edges: {G.number_of_edges()}")
     print(f"Groups: {list(groups.keys())}") 
 
+    # ===== PRE-COMPUTE LIVE GRAPHS (CEA-FIM style) =====
+    print("Pre-computing live edge graphs for faster IC simulation...")
+    live_graphs = ic.sample_live_icm(G, MC_SIMULATIONS, p=PROPAGATION_PROB)
+    print(f"Generated {MC_SIMULATIONS} live graphs")
+
     ideal_influences = {}
     N = len(G)
     for g_id, nodes in groups.items():
         k_i = math.ceil(K_SEEDS * len(nodes) / N)
         subgraph = G.subgraph(nodes)
+        # Use fewer MC for ideal (30 like CEA-FIM)
         ideal = ic.greedy_max_influence(subgraph, k_i, p=PROPAGATION_PROB, mc=30)
         ideal_influences[g_id] = ideal
         
@@ -120,10 +126,10 @@ def betterFIM(links_file, attr_file=None, attribute_name='color'):
 
     for gen in range(MAX_GEN):
         influence_cache = {}
-        # Evaluate sequentially
+        # Evaluate with pre-computed live graphs
         results = []
         for ind in population:
-            result = evuluate(ind, G, groups, ideal_influences, influence_cache)
+            result = evuluate(ind, G, groups, ideal_influences, influence_cache, live_graphs)
             results.append(result)
 
         fitnesses = []
