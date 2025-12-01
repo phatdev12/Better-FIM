@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from . import xp, to_numpy, GPU_AVAILABLE
 
 def run_IC(G, S, p=0.01, mc=50, target_nodes=None):
     """
@@ -31,8 +32,9 @@ def run_IC(G, S, p=0.01, mc=50, target_nodes=None):
                     if not neighbors:
                         continue
                     
-                    # Vectorized random check
-                    success = np.random.random(len(neighbors)) < p
+                    # GPU-accelerated Bernoulli sampling
+                    success_gpu = xp.random.random(len(neighbors)) < p
+                    success = to_numpy(success_gpu) if GPU_AVAILABLE else success_gpu
                     for i, nbr in enumerate(neighbors):
                         if success[i] and nbr not in current_active:
                             new_ones.add(nbr)

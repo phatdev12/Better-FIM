@@ -1,6 +1,12 @@
 from . import ic
 
-def calculate_MF_DCV(G, S, groups, ideal_influences, p=0.01, mc=50):
+def _seed_key(S):
+    try:
+        return tuple(sorted(S))
+    except Exception:
+        return tuple(S)
+
+def calculate_MF_DCV(G, S, groups, ideal_influences, p=0.01, mc=50, cache=None):
     """
     Tính MF (Min Fraction) và DCV (Deviation from Coverage Violation)
     
@@ -12,12 +18,20 @@ def calculate_MF_DCV(G, S, groups, ideal_influences, p=0.01, mc=50):
     min_fraction = float('inf')
     total_violation = 0
     
+    seed_key = _seed_key(S)
     for g_id in unique_groups:
         group_nodes = groups[g_id]
         if not group_nodes: 
             continue
-
-        actual_inf = ic.run_IC(G, S, p, mc, target_nodes=group_nodes)
+        if cache is not None:
+            k = (seed_key, g_id)
+            if k in cache:
+                actual_inf = cache[k]
+            else:
+                actual_inf = ic.run_IC(G, S, p, mc, target_nodes=group_nodes)
+                cache[k] = actual_inf
+        else:
+            actual_inf = ic.run_IC(G, S, p, mc, target_nodes=group_nodes)
         
         group_size = len(group_nodes)
         fraction = actual_inf / group_size if group_size > 0 else 0

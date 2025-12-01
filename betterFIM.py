@@ -1,5 +1,7 @@
 from utils import data, comunity_detection, mf_dcv, ic, fitness
+from utils import xp, to_numpy, GPU_AVAILABLE
 from multiprocessing import Pool, cpu_count
+import networkx as nx
 import numpy as np
 import random
 import math
@@ -13,12 +15,15 @@ LAMBDA_VAL = 0.5
 PROPAGATION_PROB = 0.01
 MC_SIMULATIONS = 1000
 
-def evuluate(individual, G, groups, ideal_influences):
-    mf, dcv = mf_dcv.calculate_MF_DCV(G, individual, groups, ideal_influences, p=PROPAGATION_PROB, mc=MC_SIMULATIONS)
+def evuluate(individual, G, groups, ideal_influences, cache):
+    mf, dcv = mf_dcv.calculate_MF_DCV(
+        G, individual, groups, ideal_influences,
+        p=PROPAGATION_PROB, mc=MC_SIMULATIONS, cache=cache
+    )
     fit = fitness.fitness_F(mf, dcv, LAMBDA_VAL)
     return individual, mf, dcv, fit
 
-def betterFIM(links_file, attr_file=None, attribute_name='age'):
+def betterFIM(links_file, attr_file=None, attribute_name='color'):
     try:
         if links_file.endswith('.pickle') or links_file.endswith('.pkl'):
             G, node_groups_map = data.load_data_from_pickle(links_file, attribute_name)
@@ -44,7 +49,8 @@ def betterFIM(links_file, attr_file=None, attribute_name='age'):
         ideal = ic.greedy_max_influence(subgraph, k_i, p=PROPAGATION_PROB, mc=30)
         ideal_influences[g_id] = ideal
         
-    SN_scores = data.calculate_SN(G)
+    SN_scores = nx.pagerank(G)
+    print("Starting Genetic Algorithm for seed selection...")
     
     communities, _ = comunity_detection.get_community_structure(G)
     
@@ -52,6 +58,9 @@ def betterFIM(links_file, attr_file=None, attribute_name='age'):
     SC_scores = comunity_detection.calculate_SC(communities, G, None, A_j_counts)
 
     population = []
+    comm_ids_list = list(communities.keys())
+    sc_scores_gpu = xp.array([SC_scores.get(cid, 0) for cid in comm_ids_list], dtype=float)
+    
     for _ in range(POP_SIZE):
         ind = comunity_detection.community_based_selection(G, K_SEEDS, communities, SN_scores, SC_scores)
         population.append(ind)
@@ -95,11 +104,12 @@ def betterFIM(links_file, attr_file=None, attribute_name='age'):
         
         all_nodes = list(G.nodes())
         if all_nodes:
-            weights = np.array([SN_scores.get(n, 0) + 1e-8 for n in all_nodes])
-            if weights.sum() == 0:
+            weights_gpu = xp.array([SN_scores.get(n, 0) + 1e-8 for n in all_nodes], dtype=float)
+            if float(xp.sum(weights_gpu)) == 0:
                 random_weighted_solution = random.sample(all_nodes, min(K_SEEDS, len(all_nodes)))
             else:
-                probs = weights / weights.sum()
+                probs_gpu = weights_gpu / xp.sum(weights_gpu)
+                probs = to_numpy(probs_gpu)
                 k_pick = min(K_SEEDS, len(all_nodes))
                 random_weighted_solution = list(np.random.choice(all_nodes, size=k_pick, replace=False, p=probs))
             population.append(random_weighted_solution)
@@ -109,9 +119,12 @@ def betterFIM(links_file, attr_file=None, attribute_name='age'):
     best_metrics = (0, 0)
 
     for gen in range(MAX_GEN):
-        # Evaluate using parallel processing
-        with Pool(processes=cpu_count()) as pool:
-            results = pool.starmap(evuluate, [(ind, G, groups, ideal_influences) for ind in population])
+        influence_cache = {}
+        # Evaluate sequentially
+        results = []
+        for ind in population:
+            result = evuluate(ind, G, groups, ideal_influences, influence_cache)
+            results.append(result)
 
         fitnesses = []
         for ind, mf, dcv, fit in results:
@@ -122,8 +135,10 @@ def betterFIM(links_file, attr_file=None, attribute_name='age'):
                 best_S = ind
                 best_metrics = (mf, dcv)
         
-        # Selection
-        sorted_idx = np.argsort(fitnesses)[::-1]
+        # Selection (GPU-accelerated argsort)
+        fitnesses_gpu = xp.array(fitnesses)
+        sorted_idx_gpu = xp.argsort(fitnesses_gpu)[::-1]
+        sorted_idx = to_numpy(sorted_idx_gpu)
         population = [population[i] for i in sorted_idx[:POP_SIZE]]
 
         # print(f"Gen {gen+1}: Best Fit={best_Fit:.4f} | MF={best_metrics[0]:.4f}, DCV={best_metrics[1]:.4f}")
@@ -147,19 +162,56 @@ def betterFIM(links_file, attr_file=None, attribute_name='age'):
             else:
                 child = p1[:]
             
-            # Mutation
+            # Mutation with fairness-aware node selection
             if np.random.random() < P_MUTATION and len(child) > 0:
                 idx_remove = np.random.randint(0, len(child))
-                child.pop(idx_remove)
+                removed_node = child.pop(idx_remove)
                 
+                # Calculate current group coverage in child
+                group_coverage = {g_id: 0 for g_id in groups.keys()}
+                for node in child:
+                    for g_id, g_nodes in groups.items():
+                        if node in g_nodes:
+                            group_coverage[g_id] += 1
+                            break
+                
+                # Prioritize communities containing under-covered groups
+                comm_weights = {}
+                for cid, comm_nodes in communities.items():
+                    weight = 0
+                    for g_id, g_nodes in groups.items():
+                        overlap = len(set(comm_nodes) & set(g_nodes))
+                        if overlap > 0:
+                            # Lower coverage → higher weight
+                            ideal_count = max(1, int(K_SEEDS * len(g_nodes) / len(G)))
+                            deficit = max(0, ideal_count - group_coverage[g_id])
+                            weight += deficit * overlap
+                    comm_weights[cid] = weight + 1  # +1 to avoid zero weight
+                
+                # Select community by fairness-weighted probability (GPU)
                 comm_keys = list(communities.keys())
-                if comm_keys:
-                    comm_id = np.random.choice(comm_keys)
-                    candidates = communities[comm_id]
-                    if candidates:
-                        cand = np.random.choice(candidates)
-                        if cand not in child: child.append(cand)
-                        elif len(p1) > idx_remove: child.append(p1[idx_remove])
+                weights_gpu = xp.array([comm_weights[cid] for cid in comm_keys], dtype=float)
+                weights_gpu = weights_gpu / xp.sum(weights_gpu)
+                weights_arr = to_numpy(weights_gpu)
+                comm_id = np.random.choice(comm_keys, p=weights_arr)
+                
+                candidates = list(communities[comm_id])
+                if candidates:
+                    # Prefer high-SN nodes from selected community (GPU)
+                    candidates_not_in = [c for c in candidates if c not in child]
+                    if candidates_not_in:
+                        sn_vals_gpu = xp.array([SN_scores.get(c, 0) for c in candidates_not_in], dtype=float)
+                        if float(xp.sum(sn_vals_gpu)) > 0:
+                            probs_gpu = sn_vals_gpu / xp.sum(sn_vals_gpu)
+                            probs = to_numpy(probs_gpu)
+                            cand = np.random.choice(candidates_not_in, p=probs)
+                        else:
+                            cand = np.random.choice(candidates_not_in)
+                        child.append(cand)
+                    elif len(p1) > idx_remove:
+                        child.append(p1[idx_remove])
+                    else:
+                        child.append(removed_node)
             
             # Fill if missing
             while len(child) < K_SEEDS:
