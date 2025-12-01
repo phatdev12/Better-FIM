@@ -21,6 +21,10 @@ try:
         cc_major, cc_minor = device.compute_capability
         print(f"GPU Compute Capability: {cc_major}.{cc_minor}")
         
+        # Convert to int if string
+        if isinstance(cc_major, str):
+            cc_major = int(cc_major.split('_')[0]) if '_' in cc_major else int(cc_major)
+        
         if cc_major < 6:
             print("Older GPU detected, using NumPy random with CuPy arrays")
             # Use NumPy for random, CuPy for array ops
