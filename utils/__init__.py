@@ -1,15 +1,38 @@
 # GPU acceleration with CuPy fallback to NumPy
 import numpy as np
+import os
+
+# Force specific GPU device if set
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 try:
     import cupy as cp
     # Test if GPU is actually accessible
     try:
-        _ = cp.array([1, 2, 3])
-        _ = cp.random.random(10)  # Test CURAND
+        # Set memory pool to avoid fragmentation
+        cp.cuda.set_allocator(cp.cuda.MemoryPool().malloc)
+        
+        # Test basic operations
+        test_arr = cp.array([1, 2, 3])
+        
+        # For older GPUs (compute capability < 6.0), use legacy random
+        device = cp.cuda.Device(0)
+        cc_major, cc_minor = device.compute_capability
+        print(f"GPU Compute Capability: {cc_major}.{cc_minor}")
+        
+        if cc_major < 6:
+            print("Older GPU detected, using NumPy random with CuPy arrays")
+            # Use NumPy for random, CuPy for array ops
+            import numpy.random as cp_random
+            cp.random = cp_random
+        else:
+            # Test CURAND for newer GPUs
+            _ = cp.random.random(10)
+        
         xp = cp
         GPU_AVAILABLE = True
-        print("GPU (CuPy) enabled for acceleration")
+        print(f"GPU (CuPy) enabled for acceleration on {device.name.decode()}")
     except Exception as e:
         print(f"GPU found but not accessible: {e}")
         print("Falling back to CPU (NumPy)")
