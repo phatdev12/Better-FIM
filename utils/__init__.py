@@ -16,18 +16,17 @@ try:
         # Test basic operations
         test_arr = cp.array([1, 2, 3])
         
-        # For older GPUs (compute capability < 6.0), use legacy random
+        # Get device info properly
         device = cp.cuda.Device(0)
         cc_major, cc_minor = device.compute_capability
         print(f"GPU Compute Capability: {cc_major}.{cc_minor}")
         
-        # Convert to int if string
+        # Handle compute capability
         if isinstance(cc_major, str):
             cc_major = int(cc_major.split('_')[0]) if '_' in cc_major else int(cc_major)
         
         if cc_major < 6:
             print("Older GPU detected, using NumPy random with CuPy arrays")
-            # Use NumPy for random, CuPy for array ops
             import numpy.random as cp_random
             cp.random = cp_random
         else:
@@ -36,13 +35,23 @@ try:
         
         xp = cp
         GPU_AVAILABLE = True
-        print(f"GPU (CuPy) enabled for acceleration on {device.name.decode()}")
+        
+        # Get GPU name correctly
+        try:
+            props = cp.cuda.runtime.getDeviceProperties(device.id)
+            gpu_name = props['name'].decode() if isinstance(props['name'], bytes) else props['name']
+        except:
+            gpu_name = f"CUDA Device {device.id}"
+        
+        print(f"GPU (CuPy) enabled for acceleration on {gpu_name}")
+        
     except Exception as e:
         print(f"GPU found but not accessible: {e}")
         print("Falling back to CPU (NumPy)")
         cp = np
         xp = np
         GPU_AVAILABLE = False
+        
 except ImportError:
     cp = np
     xp = np
