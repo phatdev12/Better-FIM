@@ -5,6 +5,7 @@ import networkx as nx
 import numpy as np
 import random
 import math
+import copy
 
 K_SEEDS = 40
 POP_SIZE = 10
@@ -13,17 +14,17 @@ P_CROSSOVER = 0.6
 P_MUTATION = 0.1
 LAMBDA_VAL = 0.5
 PROPAGATION_PROB = 0.01
-MC_SIMULATIONS = 1000  # Tăng lại từ 100 lên 1000 để tăng accuracy
+MC_SIMULATIONS = 1000  # Số lần mô phỏng Monte Carlo
 
-def evuluate(individual, G, groups, ideal_influences, cache, live_graphs=None):
+def evuluate(individual, G, groups, ideal_influences, cache):
     mf, dcv = mf_dcv.calculate_MF_DCV(
         G, individual, groups, ideal_influences,
-        p=PROPAGATION_PROB, mc=MC_SIMULATIONS, cache=cache, live_graphs=live_graphs
+        p=PROPAGATION_PROB, mc=MC_SIMULATIONS, cache=cache
     )
     fit = fitness.fitness_F(mf, dcv, LAMBDA_VAL)
     return individual, mf, dcv, fit
 
-def betterFIM(links_file, attr_file=None, attribute_name='color'):
+def init_betterFIM_data(links_file, attr_file=None, attribute_name='color'):
     try:
         if links_file.endswith('.pickle') or links_file.endswith('.pkl'):
             G, node_groups_map = data.load_data_from_pickle(links_file, attribute_name)
@@ -31,45 +32,49 @@ def betterFIM(links_file, attr_file=None, attribute_name='color'):
             G, node_groups_map = data.load_data(links_file, attr_file)
     except FileNotFoundError:
         print(f"Error: Không tìm thấy file data. Hãy đảm bảo {links_file} tồn tại.")
-        return
-
+        return None
     groups = {}
     for n, g in node_groups_map.items():
         if g not in groups: groups[g] = []
         groups[g].append(n)
     
     print(f"Nodes: {len(G)}, Edges: {G.number_of_edges()}")
-    print(f"Groups: {list(groups.keys())}") 
-
-    # ===== PRE-COMPUTE LIVE GRAPHS (CEA-FIM style) =====
-    print("Pre-computing live edge graphs for faster IC simulation...")
-    live_graphs = ic.sample_live_icm(G, MC_SIMULATIONS, p=PROPAGATION_PROB)
-    print(f"Generated {MC_SIMULATIONS} live graphs")
-
-    ideal_influences = {}
+    print(f"Groups: {list(groups.keys())}")
+    
+    SN_scores = nx.pagerank(G)
+    communities, _ = comunity_detection.get_community_structure(G)
+    A_j_counts = {g: len(nodes) for g, nodes in groups.items()}
+    SC_scores = comunity_detection.calculate_SC(communities, G, None, A_j_counts)
     N = len(G)
+    ideal_influences = {}
     for g_id, nodes in groups.items():
         k_i = math.ceil(K_SEEDS * len(nodes) / N)
         subgraph = G.subgraph(nodes)
-        # Use fewer MC for ideal (30 like CEA-FIM)
         ideal = ic.greedy_max_influence(subgraph, k_i, p=PROPAGATION_PROB, mc=30)
         ideal_influences[g_id] = ideal
-        
-    SN_scores = nx.pagerank(G)
-    print("Starting Genetic Algorithm for seed selection...")
-    
-    communities, _ = comunity_detection.get_community_structure(G)
-    
-    A_j_counts = {g: len(nodes) for g, nodes in groups.items()}
-    SC_scores = comunity_detection.calculate_SC(communities, G, None, A_j_counts)
+    return {
+        'G': G,
+        'groups': groups,
+        'SN_scores': SN_scores,
+        'communities': communities,
+        'SC_scores': SC_scores,
+        'ideal_influences': ideal_influences
+    }
 
+def betterFIM_main(data_obj):
+    G = data_obj['G']
+    groups = data_obj['groups']
+    SN_scores = data_obj['SN_scores']
+    communities = data_obj['communities']
+    SC_scores = data_obj['SC_scores']
+    ideal_influences = data_obj['ideal_influences']
+    
     population = []
-    comm_ids_list = list(communities.keys())
-    sc_scores_gpu = xp.array([SC_scores.get(cid, 0) for cid in comm_ids_list], dtype=float)
     
     for _ in range(POP_SIZE):
         ind = comunity_detection.community_based_selection(G, K_SEEDS, communities, SN_scores, SC_scores)
         population.append(ind)
+        
         community_counter = {cid: 0 for cid in communities.keys()}
         community_scores = {cid: SC_scores.get(cid, 0) for cid in communities.keys()}
         community_selected = {cid: 0 for cid in communities.keys()}
@@ -126,10 +131,9 @@ def betterFIM(links_file, attr_file=None, attribute_name='color'):
 
     for gen in range(MAX_GEN):
         influence_cache = {}
-        # Evaluate with pre-computed live graphs
         results = []
         for ind in population:
-            result = evuluate(ind, G, groups, ideal_influences, influence_cache, live_graphs)
+            result = evuluate(ind, G, groups, ideal_influences, influence_cache)
             results.append(result)
 
         fitnesses = []
@@ -141,15 +145,11 @@ def betterFIM(links_file, attr_file=None, attribute_name='color'):
                 best_S = ind
                 best_metrics = (mf, dcv)
         
-        # Selection (GPU-accelerated argsort)
         fitnesses_gpu = xp.array(fitnesses)
         sorted_idx_gpu = xp.argsort(fitnesses_gpu)[::-1]
         sorted_idx = to_numpy(sorted_idx_gpu)
         population = [population[i] for i in sorted_idx[:POP_SIZE]]
 
-        # print(f"Gen {gen+1}: Best Fit={best_Fit:.4f} | MF={best_metrics[0]:.4f}, DCV={best_metrics[1]:.4f}")
-
-        # Crossover & Mutation
         new_pop = []
         new_pop.extend(population[:2]) # Elitism
         
@@ -159,51 +159,39 @@ def betterFIM(links_file, attr_file=None, attribute_name='color'):
             p1 = population[idx1]
             p2 = population[idx2]
             
-            # Crossover
             if np.random.random() < P_CROSSOVER:
                 combined = list(set(p1) | set(p2))
-                # Sort theo SN score để lấy top node
                 combined.sort(key=lambda x: SN_scores.get(x, 0), reverse=True)
                 child = combined[:K_SEEDS]
             else:
                 child = p1[:]
             
-            # Mutation with fairness-aware node selection
             if np.random.random() < P_MUTATION and len(child) > 0:
                 idx_remove = np.random.randint(0, len(child))
                 removed_node = child.pop(idx_remove)
-                
-                # Calculate current group coverage in child
                 group_coverage = {g_id: 0 for g_id in groups.keys()}
                 for node in child:
                     for g_id, g_nodes in groups.items():
                         if node in g_nodes:
                             group_coverage[g_id] += 1
                             break
-                
-                # Prioritize communities containing under-covered groups
                 comm_weights = {}
                 for cid, comm_nodes in communities.items():
                     weight = 0
                     for g_id, g_nodes in groups.items():
                         overlap = len(set(comm_nodes) & set(g_nodes))
                         if overlap > 0:
-                            # Lower coverage → higher weight
                             ideal_count = max(1, int(K_SEEDS * len(g_nodes) / len(G)))
                             deficit = max(0, ideal_count - group_coverage[g_id])
                             weight += deficit * overlap
-                    comm_weights[cid] = weight + 1  # +1 to avoid zero weight
-                
-                # Select community by fairness-weighted probability (GPU)
+                    comm_weights[cid] = weight + 1
                 comm_keys = list(communities.keys())
                 weights_gpu = xp.array([comm_weights[cid] for cid in comm_keys], dtype=float)
                 weights_gpu = weights_gpu / xp.sum(weights_gpu)
                 weights_arr = to_numpy(weights_gpu)
                 comm_id = np.random.choice(comm_keys, p=weights_arr)
-                
                 candidates = list(communities[comm_id])
                 if candidates:
-                    # Prefer high-SN nodes from selected community (GPU)
                     candidates_not_in = [c for c in candidates if c not in child]
                     if candidates_not_in:
                         sn_vals_gpu = xp.array([SN_scores.get(c, 0) for c in candidates_not_in], dtype=float)
@@ -218,20 +206,28 @@ def betterFIM(links_file, attr_file=None, attribute_name='color'):
                         child.append(p1[idx_remove])
                     else:
                         child.append(removed_node)
-            
-            # Fill if missing
             while len(child) < K_SEEDS:
                 possible = list(set(G.nodes()) - set(child))
                 if not possible: break
                 child.append(np.random.choice(possible))
-                
-            
-            # Trim if excess
             child = child[:K_SEEDS]
-            
             new_pop.append(child)
-            
         population = new_pop
-    
-    
     return best_Fit, best_metrics, best_S
+
+def betterFIM(*args, **kwargs):
+    """
+    Wrapper: Cho phép gọi betterFIM(data_obj) hoặc betterFIM(links_file, attr_file, ...)
+    """
+    if len(args) == 1:
+        # Đã truyền data_obj
+        return betterFIM_main(args[0])
+    elif len(args) >= 2:
+        # Truyền links_file, attr_file, ...
+        links_file = args[0]
+        attr_file = args[1]
+        attribute_name = args[2] if len(args) > 2 else 'color'
+        data_obj = init_betterFIM_data(links_file, attr_file, attribute_name)
+        return betterFIM_main(data_obj)
+    else:
+        raise TypeError("betterFIM requires either (data_obj) or (links_file, attr_file, [attribute_name])")
