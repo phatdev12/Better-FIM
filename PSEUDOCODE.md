@@ -94,6 +94,34 @@ Step3: Population Evolution.
 
 ---
 
+## Algorithm 3.1: Selection with Elitism + Random Injection
+
+**Input:** P: current population; F: fitness function; pop: population size; k: seed set size; C: communities
+
+**Output:** Population after selection and diversity injection
+
+1. scores ← [(Pi, F(Pi)) for Pi in P]
+2. sorted ← Sort_Descending(scores, by score)
+3. elites ← [individual for (individual, _) in sorted[0:pop]]
+4. r ← ⌊pop / 3⌋  // number of random individuals to inject
+5. R ← []
+6. **while** |R| < r **do**
+7. &nbsp;&nbsp;&nbsp;&nbsp;S ← []
+8. &nbsp;&nbsp;&nbsp;&nbsp;**while** |S| < k **do**
+9. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;c ← Random_Choice(C)  // random community
+10. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;v ← Random_Choice(c)  // random node in community c
+11. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;**if** v ∉ S **then** S.add(v)
+12. &nbsp;&nbsp;&nbsp;&nbsp;**end while**
+13. &nbsp;&nbsp;&nbsp;&nbsp;R.add(S)
+14. **end while**
+15. P_selected ← elites ∪ R  // Note: may exceed pop; next stage trims to pop
+16. **return** P_selected
+
+Notes:
+- GPU path: compute scores on GPU and use argsort; random injection uses uniform selection over communities and their nodes.
+
+---
+
 ## Algorithm 4: Mutation(G, pop, k, C, SN, P', mu, groups)
 
 **Input:** G, pop, k, C, SN, P', mu, groups;
@@ -190,6 +218,8 @@ Step3: Population Evolution.
 20. &nbsp;&nbsp;&nbsp;&nbsp;total_spread ← total_spread + spread;
 21. **end for**
 22. **return** total_spread / mc;
+
+
 
 ---
 

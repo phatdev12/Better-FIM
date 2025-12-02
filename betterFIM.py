@@ -156,10 +156,33 @@ def betterFIM_main(data_obj):
         fitnesses_gpu = xp.array(fitnesses)
         sorted_idx_gpu = xp.argsort(fitnesses_gpu)[::-1]
         sorted_idx = to_numpy(sorted_idx_gpu)
+        # Selection: keep top N (elites)
         population = [population[i] for i in sorted_idx[:POP_SIZE]]
 
+        # Inject ~N/3 random solutions to avoid premature convergence
+        def make_random_solution():
+            sol = []
+            comm_keys_local = list(communities.keys())
+            while len(sol) < K_SEEDS:
+                # Step 1: random community and random node in it
+                c_id = random.choice(comm_keys_local)
+                c_nodes = list(communities[c_id])
+                if not c_nodes:
+                    continue
+                v = random.choice(c_nodes)
+                # Step 2: add if not present
+                if v not in sol:
+                    sol.append(v)
+                # Step 3: stop when |S| == k (handled by while condition)
+            return sol
+
+        inject_count = max(1, POP_SIZE // 3)
+        for _ in range(inject_count):
+            population.append(make_random_solution())
+
         new_pop = []
-        new_pop.extend(population[:2]) # Elitism
+        # Keep top-2 strong elites explicitly
+        new_pop.extend(population[:2])
         
         while len(new_pop) < POP_SIZE:
             idx1 = np.random.randint(0, len(population))
