@@ -120,9 +120,17 @@ def betterFIM_main(data_obj):
                 random_weighted_solution = random.sample(all_nodes, min(K_SEEDS, len(all_nodes)))
             else:
                 probs_gpu = weights_gpu / xp.sum(weights_gpu)
-                probs = to_numpy(probs_gpu)
                 k_pick = min(K_SEEDS, len(all_nodes))
-                random_weighted_solution = list(np.random.choice(all_nodes, size=k_pick, replace=False, p=probs))
+                # Use GPU sampling when available
+                if GPU_AVAILABLE:
+                    # Build gp arrays and sample indices on GPU, then map back to nodes
+                    probs_gpu = probs_gpu / xp.sum(probs_gpu)
+                    idxs_gpu = xp.random.choice(xp.arange(len(all_nodes)), size=k_pick, replace=False, p=probs_gpu)
+                    idxs = to_numpy(idxs_gpu)
+                    random_weighted_solution = [all_nodes[int(i)] for i in idxs]
+                else:
+                    probs = to_numpy(probs_gpu)
+                    random_weighted_solution = list(np.random.choice(all_nodes, size=k_pick, replace=False, p=probs))
             population.append(random_weighted_solution)
 
     best_S = None
@@ -188,19 +196,33 @@ def betterFIM_main(data_obj):
                 comm_keys = list(communities.keys())
                 weights_gpu = xp.array([comm_weights[cid] for cid in comm_keys], dtype=float)
                 weights_gpu = weights_gpu / xp.sum(weights_gpu)
-                weights_arr = to_numpy(weights_gpu)
-                comm_id = np.random.choice(comm_keys, p=weights_arr)
+                if GPU_AVAILABLE:
+                    probs_gpu = weights_gpu / xp.sum(weights_gpu)
+                    idx_gpu = xp.random.choice(xp.arange(len(comm_keys)), p=probs_gpu)
+                    comm_id = comm_keys[int(to_numpy(idx_gpu))]
+                else:
+                    weights_arr = to_numpy(weights_gpu)
+                    comm_id = np.random.choice(comm_keys, p=weights_arr)
                 candidates = list(communities[comm_id])
                 if candidates:
                     candidates_not_in = [c for c in candidates if c not in child]
                     if candidates_not_in:
                         sn_vals_gpu = xp.array([SN_scores.get(c, 0) for c in candidates_not_in], dtype=float)
                         if float(xp.sum(sn_vals_gpu)) > 0:
-                            probs_gpu = sn_vals_gpu / xp.sum(sn_vals_gpu)
-                            probs = to_numpy(probs_gpu)
-                            cand = np.random.choice(candidates_not_in, p=probs)
+                            if GPU_AVAILABLE:
+                                probs_gpu = sn_vals_gpu / xp.sum(sn_vals_gpu)
+                                idx_gpu = xp.random.choice(xp.arange(len(candidates_not_in)), p=probs_gpu)
+                                cand = candidates_not_in[int(to_numpy(idx_gpu))]
+                            else:
+                                probs_gpu = sn_vals_gpu / xp.sum(sn_vals_gpu)
+                                probs = to_numpy(probs_gpu)
+                                cand = np.random.choice(candidates_not_in, p=probs)
                         else:
-                            cand = np.random.choice(candidates_not_in)
+                            if GPU_AVAILABLE:
+                                idx_gpu = xp.random.choice(xp.arange(len(candidates_not_in)))
+                                cand = candidates_not_in[int(to_numpy(idx_gpu))]
+                            else:
+                                cand = np.random.choice(candidates_not_in)
                         child.append(cand)
                     elif len(p1) > idx_remove:
                         child.append(p1[idx_remove])
