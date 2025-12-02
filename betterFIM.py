@@ -125,8 +125,8 @@ def betterFIM_main(data_obj):
                 if GPU_AVAILABLE:
                     # Build gp arrays and sample indices on GPU, then map back to nodes
                     probs_gpu = probs_gpu / xp.sum(probs_gpu)
-                    idxs_gpu = xp.random.choice(xp.arange(len(all_nodes)), size=k_pick, replace=False, p=probs_gpu)
-                    idxs = to_numpy(idxs_gpu)
+                    probs_cpu = to_numpy(probs_gpu)
+                    idxs = np.random.choice(len(all_nodes), size=k_pick, replace=False, p=probs_cpu)
                     random_weighted_solution = [all_nodes[int(i)] for i in idxs]
                 else:
                     probs = to_numpy(probs_gpu)
@@ -221,8 +221,9 @@ def betterFIM_main(data_obj):
                 weights_gpu = weights_gpu / xp.sum(weights_gpu)
                 if GPU_AVAILABLE:
                     probs_gpu = weights_gpu / xp.sum(weights_gpu)
-                    idx_gpu = xp.random.choice(xp.arange(len(comm_keys)), p=probs_gpu)
-                    comm_id = comm_keys[int(to_numpy(idx_gpu))]
+                    probs_cpu = to_numpy(probs_gpu)
+                    idx = np.random.choice(len(comm_keys), p=probs_cpu)
+                    comm_id = comm_keys[int(idx)]
                 else:
                     weights_arr = to_numpy(weights_gpu)
                     comm_id = np.random.choice(comm_keys, p=weights_arr)
@@ -234,16 +235,17 @@ def betterFIM_main(data_obj):
                         if float(xp.sum(sn_vals_gpu)) > 0:
                             if GPU_AVAILABLE:
                                 probs_gpu = sn_vals_gpu / xp.sum(sn_vals_gpu)
-                                idx_gpu = xp.random.choice(xp.arange(len(candidates_not_in)), p=probs_gpu)
-                                cand = candidates_not_in[int(to_numpy(idx_gpu))]
+                                probs_cpu = to_numpy(probs_gpu)
+                                idx = np.random.choice(len(candidates_not_in), p=probs_cpu)
+                                cand = candidates_not_in[int(idx)]
                             else:
                                 probs_gpu = sn_vals_gpu / xp.sum(sn_vals_gpu)
                                 probs = to_numpy(probs_gpu)
                                 cand = np.random.choice(candidates_not_in, p=probs)
                         else:
                             if GPU_AVAILABLE:
-                                idx_gpu = xp.random.choice(xp.arange(len(candidates_not_in)))
-                                cand = candidates_not_in[int(to_numpy(idx_gpu))]
+                                idx = np.random.choice(len(candidates_not_in))
+                                cand = candidates_not_in[int(idx)]
                             else:
                                 cand = np.random.choice(candidates_not_in)
                         child.append(cand)
